@@ -1,0 +1,72 @@
+#lstm-cnn
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Conv1D, MaxPooling1D, LSTM, Flatten
+from sklearn.model_selection import train_test_split
+
+#upload
+data_path = 
+data = pd.read_csv(data_path)
+
+#pre-use
+target_column =  # target
+n_input_steps = 15  #past 15 days
+data_processed = data.drop(columns=['date'])  #remove
+data_processed.fillna(method='ffill', inplace=True)
+
+# 归一化数据
+scaler = MinMaxScaler()
+scaled_data = scaler.fit_transform(data_processed)
+
+# 目标变量的归一化器
+scaler_target = MinMaxScaler()
+scaler_target.fit(data_processed[[target_column]])
+
+# 准备输入和输出序列
+target_index = data_processed.columns.get_loc(target_column)
+X, y = [], []
+for i in range(n_input_steps, len(scaled_data)):
+    X.append(scaled_data[i-n_input_steps:i, :])
+    y.append(scaled_data[i, target_index])
+X, y = np.array(X), np.array(y)
+
+# 划分train和test
+train_size = int(len(X) * 0.7) #前70%train
+X_train, X_test = X[:train_size], X[train_size:]
+y_train, y_test = y[:train_size], y[train_size:]
+
+#cnn-lstm model 
+def create_cnn_lstm_model(input_shape, n_filters, kernel_size, pool_size, lstm_units, output_units):
+    model = Sequential()
+    model.add(Conv1D(filters=n_filters, kernel_size=kernel_size, activation='relu', input_shape=input_shape))
+    model.add(MaxPooling1D(pool_size=pool_size))
+    model.add(LSTM(lstm_units, activation='relu'))
+    model.add(Flatten())
+    model.add(Dense(output_units))
+    model.compile(optimizer='adam', loss='mse')
+    return model
+
+#parameters
+n_filters = 64
+kernel_size = 2
+pool_size = 2
+lstm_units = 50
+output_units = 1
+input_shape = (X_train.shape[1], X_train.shape[2])
+
+# 创建并训练模型
+model = create_cnn_lstm_model(input_shape, n_filters, kernel_size, pool_size, lstm_units, output_units)
+model.fit(X_train, y_train, epochs=100, batch_size=32)
+
+# 进行预测
+y_pred = model.predict(X_test)
+
+# 逆变换预测和真实值
+y_pred_rescaled = scaler_target.inverse_transform(y_pred)
+y_test_rescaled = scaler_target.inverse_transform(y_test.reshape(-1, 1))
+
+# 获取测试数据对应的日期范围
+test_dates = pd.date_range(start=data['date'].iloc[n_input_steps+train_size], periods=len(y_test), freq='D')
