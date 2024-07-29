@@ -1,44 +1,63 @@
-#lstm-cnn
+# lstm-cnn hybrid model
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Conv1D, MaxPooling1D, LSTM, Flatten
-from sklearn.model_selection import train_test_split
 
-#upload
-data_path = 
-data = pd.read_csv(data_path)
+# 上传文件路径
+data_path = '/Users/allen/Desktop/Modified_Keukenhof_Data.xlsx'
+data = pd.read_excel(data_path)
 
-#pre-use
-target_column =  # target
-n_input_steps = 15  #past 15 days
-data_processed = data.drop(columns=['date'])  #remove
-data_processed.fillna(method='ffill', inplace=True)
+# 转换时间戳
+data['time'] = pd.to_datetime(data['time'])
 
-# 归一化数据
+# 筛选1/15 - 4/30的数据进行训练
+train_data = data[(data['time'] >= '2024-03-23') & (data['time'] <= '2024-04-30')]
+
+# 筛选5/01 - 5/10的数据进行预测
+test_data = data[(data['time'] >= '2024-05-01') & (data['time'] <= '2024-05-14')]
+
+# 选择目标列
+target_column = 'travel time'  # 请将此替换为目标列的实际名称
+
+# 预处理训练数据
+n_input_steps = 15  # 使用过去15天的数据
+train_data_processed = train_data.drop(columns=['time'])  # 移除日期列
+train_data_processed.fillna(method='ffill', inplace=True)  # 向前填充缺失值
+
+# 归一化训练数据
 scaler = MinMaxScaler()
-scaled_data = scaler.fit_transform(data_processed)
+scaled_train_data = scaler.fit_transform(train_data_processed)
 
 # 目标变量的归一化器
 scaler_target = MinMaxScaler()
-scaler_target.fit(data_processed[[target_column]])
+scaler_target.fit(train_data_processed[[target_column]])
 
-# 准备输入和输出序列
-target_index = data_processed.columns.get_loc(target_column)
-X, y = [], []
-for i in range(n_input_steps, len(scaled_data)):
-    X.append(scaled_data[i-n_input_steps:i, :])
-    y.append(scaled_data[i, target_index])
-X, y = np.array(X), np.array(y)
+# 准备训练数据的输入和输出序列
+target_index = train_data_processed.columns.get_loc(target_column)
+X_train, y_train = [], []
+for i in range(n_input_steps, len(scaled_train_data)):
+    X_train.append(scaled_train_data[i-n_input_steps:i, :])
+    y_train.append(scaled_train_data[i, target_index])
+X_train, y_train = np.array(X_train), np.array(y_train)
 
-# 划分train和test
-train_size = int(len(X) * 0.7) #前70%train
-X_train, X_test = X[:train_size], X[train_size:]
-y_train, y_test = y[:train_size], y[train_size:]
+# 预处理测试数据
+test_data_processed = test_data.drop(columns=['time'])  # 移除日期列
+test_data_processed.fillna(method='ffill', inplace=True)  # 向前填充缺失值
 
-#cnn-lstm model 
+# 归一化测试数据
+scaled_test_data = scaler.transform(test_data_processed)
+
+# 准备测试数据的输入和输出序列
+X_test, y_test = [], []
+for i in range(n_input_steps, len(scaled_test_data)):
+    X_test.append(scaled_test_data[i-n_input_steps:i, :])
+    y_test.append(scaled_test_data[i, target_index])
+X_test, y_test = np.array(X_test), np.array(y_test)
+
+# 定义CNN-LSTM模型
 def create_cnn_lstm_model(input_shape, n_filters, kernel_size, pool_size, lstm_units, output_units):
     model = Sequential()
     model.add(Conv1D(filters=n_filters, kernel_size=kernel_size, activation='relu', input_shape=input_shape))
@@ -49,7 +68,7 @@ def create_cnn_lstm_model(input_shape, n_filters, kernel_size, pool_size, lstm_u
     model.compile(optimizer='adam', loss='mse')
     return model
 
-#parameters
+# 设置参数
 n_filters = 64
 kernel_size = 2
 pool_size = 2
@@ -68,5 +87,226 @@ y_pred = model.predict(X_test)
 y_pred_rescaled = scaler_target.inverse_transform(y_pred)
 y_test_rescaled = scaler_target.inverse_transform(y_test.reshape(-1, 1))
 
+rmse = np.sqrt(mean_squared_error(y_test_rescaled, y_pred_rescaled))
+
 # 获取测试数据对应的日期范围
-test_dates = pd.date_range(start=data['date'].iloc[n_input_steps+train_size], periods=len(y_test), freq='D')
+test_dates = test_data['time'].iloc[n_input_steps:].reset_index(drop=True)
+
+# 绘制实际值和预测值的对比图
+plt.figure(figsize=(14, 6))
+plt.plot(test_dates, y_test_rescaled, label='Actual Travel Time', color='blue')
+plt.plot(test_dates, y_pred_rescaled, label='Predicted Travel Time', color='red')
+plt.xlabel('Time')
+plt.ylabel('Travel Time (s)')
+plt.title('Comparison of Actual and Predicted Travel Times (5/01 - 5/14)on Hybrid Model')
+plt.legend()
+plt.show()
+
+rmse
+
+
+Epoch 1/100
+/Users/allen/anaconda3/lib/python3.11/site-packages/keras/src/layers/convolutional/base_conv.py:107: UserWarning: Do not pass an `input_shape`/`input_dim` argument to a layer. When using Sequential models, prefer using an `Input(shape)` object as the first layer in the model instead.
+  super().__init__(activity_regularizer=activity_regularizer, **kwargs)
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0402  
+Epoch 2/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0319
+Epoch 3/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0258
+Epoch 4/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0206
+Epoch 5/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0237
+Epoch 6/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0169
+Epoch 7/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0162
+Epoch 8/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0133
+Epoch 9/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0112
+Epoch 10/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0100
+Epoch 11/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0097
+Epoch 12/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0089
+Epoch 13/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0090
+Epoch 14/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0102
+Epoch 15/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0097
+Epoch 16/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0086
+Epoch 17/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0093
+Epoch 18/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0096
+Epoch 19/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0091 
+Epoch 20/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0077 
+Epoch 21/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0082
+Epoch 22/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0100
+Epoch 23/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0068
+Epoch 24/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0092 
+Epoch 25/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0061
+Epoch 26/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0073
+Epoch 27/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0068
+Epoch 28/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0084
+Epoch 29/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0059
+Epoch 30/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0078
+Epoch 31/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0069
+Epoch 32/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0075
+Epoch 33/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0073
+Epoch 34/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0063
+Epoch 35/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0056
+Epoch 36/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0055
+Epoch 37/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0059
+Epoch 38/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0056
+Epoch 39/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0054
+Epoch 40/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0073
+Epoch 41/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0062
+Epoch 42/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0071
+Epoch 43/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0068
+Epoch 44/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0060
+Epoch 45/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0056 
+Epoch 46/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0062
+Epoch 47/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0057
+Epoch 48/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0058
+Epoch 49/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0056
+Epoch 50/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - loss: 0.0055
+Epoch 51/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0061
+Epoch 52/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0055
+Epoch 53/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0050
+Epoch 54/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0067
+Epoch 55/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0052
+Epoch 56/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0049
+Epoch 57/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0048
+Epoch 58/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0057
+Epoch 59/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0056
+Epoch 60/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0046
+Epoch 61/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0047
+Epoch 62/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0055
+Epoch 63/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0058
+Epoch 64/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0089
+Epoch 65/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0053
+Epoch 66/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0053
+Epoch 67/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0047
+Epoch 68/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0052
+Epoch 69/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0049
+Epoch 70/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0046
+Epoch 71/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0050
+Epoch 72/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0050
+Epoch 73/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0043
+Epoch 74/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0049
+Epoch 75/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0044
+Epoch 76/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0046
+Epoch 77/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0050
+Epoch 78/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0045
+Epoch 79/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0043
+Epoch 80/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0045
+Epoch 81/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0039
+Epoch 82/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0040
+Epoch 83/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0037
+Epoch 84/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0045
+Epoch 85/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0053
+Epoch 86/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0041
+Epoch 87/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0052
+Epoch 88/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0056
+Epoch 89/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0042
+Epoch 90/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0039
+Epoch 91/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0042
+Epoch 92/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0040
+Epoch 93/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0043
+Epoch 94/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0035
+Epoch 95/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0047
+Epoch 96/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0049
+Epoch 97/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0045
+Epoch 98/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0041
+Epoch 99/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0043
+Epoch 100/100
+15/15 ━━━━━━━━━━━━━━━━━━━━ 0s 1ms/step - loss: 0.0033
+5/5 ━━━━━━━━━━━━━━━━━━━━ 0s 11ms/step
+
+
