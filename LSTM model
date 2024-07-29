@@ -1,0 +1,73 @@
+## LSTM model
+
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
+from datetime import datetime
+import matplotlib.pyplot as plt
+
+# Load the modified Excel file
+file_path = '/Users/allen/Desktop/Modified_Keukenhof_Data.xlsx'
+data = pd.read_excel(file_path)
+
+# Convert the 'time' column to datetime
+data['time'] = pd.to_datetime(data['time'])
+
+# Filter data for training (January to March) and testing (March to May)
+train_data = data[(data['time'] >= '2024-03-23') & (data['time'] <= '2024-04-30')]
+test_data = data[(data['time'] >= '2024-05-01') & (data['time'] <= '2024-05-13')]
+
+# Prepare the feature and target arrays
+scaler = MinMaxScaler()
+train_scaled = scaler.fit_transform(train_data[['travel time', 'speed (km/u)', 'Timeliness (%)']])
+test_scaled = scaler.transform(test_data[['travel time', 'speed (km/u)', 'Timeliness (%)']])
+
+# Function to create sequences
+def create_sequences(data, seq_length):
+    X, y = [], []
+    for i in range(len(data) - seq_length):
+        X.append(data[i:i+seq_length, 1:])  # use speed and timeliness as features
+        y.append(data[i+seq_length, 0])  # predict travel time
+    return np.array(X), np.array(y)
+
+seq_length = 24  # use past 24 hours to predict the next travel time
+X_train, y_train = create_sequences(train_scaled, seq_length)
+X_test, y_test = create_sequences(test_scaled, seq_length)
+
+# Reshape input to be 3D [samples, time steps, features]
+X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], 2))
+X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], 2))
+
+# Build the LSTM model
+model = Sequential()
+model.add(LSTM(50, activation='relu', input_shape=(seq_length, 2)))
+model.add(Dense(1))
+model.compile(optimizer='adam', loss='mse')
+
+# Train the model
+history = model.fit(X_train, y_train, epochs=20, batch_size=32, validation_split=0.1, verbose=1)
+
+# Predict on the test set
+y_pred_scaled = model.predict(X_test)
+y_pred = scaler.inverse_transform(np.concatenate((y_pred_scaled, np.zeros((y_pred_scaled.shape[0], 2))), axis=1))[:,0]
+y_test_actual = scaler.inverse_transform(np.concatenate((y_test.reshape(-1, 1), np.zeros((y_test.shape[0], 2))), axis=1))[:,0]
+
+# Calculate RMSE
+rmse = np.sqrt(mean_squared_error(y_test_actual, y_pred))
+
+# Plot the results
+plt.figure(figsize=(14, 7))
+plt.plot(test_data['time'].iloc[seq_length:], y_test_actual, label='Actual Travel Time', color='blue', alpha=0.6)
+plt.plot(test_data['time'].iloc[seq_length:], y_pred, label='Predicted Travel Time', color='red', alpha=0.6)
+plt.title('Comparison of Actual and Predicted Travel Times on LSTM')
+plt.xlabel('Time')
+plt.ylabel('Travel Time (s)')
+plt.legend()
+plt.grid(True)
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+rmse
